@@ -1,0 +1,17 @@
+# Values for deploying the minimized (defective) image under test.
+# Used by tests (conftest.py) and for manual runs.
+#
+# Usage (manual):
+#   helm install my-release bitnami/postgresql -f helm-values/defective-image.yaml -n minimus-test --create-namespace
+
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: docker.io
+  repository: halex1985/postgresql
+  tag: latest
+
+auth:
+  postgresPassword: secretpassword
