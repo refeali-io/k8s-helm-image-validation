@@ -174,7 +174,7 @@ drwx------ 2 root root 4096 Jan  1  1970 /docker-entrypoint-preinitdb.d
 
 ```bash
 helm install minimus-manual bitnami/postgresql \
-  -f helm-values/defective-image.yaml \
+  -f helm-values/postgresql-defective-image-values.yaml \
   -n minimus-test --create-namespace
 ```
 
@@ -209,6 +209,6 @@ However, the hook directories (`/docker-entrypoint-initdb.d/`, `/docker-entrypoi
 
 - **DEF-01 (Data Dir):** Masked on K8s by PVC; still causes crash on pure Docker.
 - **DEF-02 (Hook Dirs):** Visible in logs on both Docker and K8s; non-fatal on K8s.
-- **Automation:** The automated test suite (`tests/test_helm_bugs.py`) checks for "Permission denied" in logs (Test 2) — this **passes** on K8s. Tests that expect pod failure (Tests 1, 3, 4) will **fail** on K8s because the pod is healthy.
+- **Automation:** The automated test suite (`tests/test_postgresql_bugs.py`) checks for "Permission denied" in logs (Test 2) — this **passes** on K8s. Tests that expect pod failure (Tests 1, 3, 4) will **fail** on K8s because the pod is healthy.
 
 **Recommendation for Minimus:** The image defects are real and affect Docker deployments. On K8s, DEF-01 is masked by PVC but DEF-02 is still present (logs show errors). The image should be fixed for both environments to ensure clean logs and consistent behavior.

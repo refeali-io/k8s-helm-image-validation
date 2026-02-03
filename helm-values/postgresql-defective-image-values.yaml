@@ -2,7 +2,7 @@
 # Used by tests (conftest.py) and for manual runs.
 #
 # Usage (manual):
-#   helm install my-release bitnami/postgresql -f helm-values/defective-image.yaml -n minimus-test --create-namespace
+#   helm install my-release bitnami/postgresql -f helm-values/postgresql-defective-image-values.yaml -n minimus-test --create-namespace
 
 global:
   security:

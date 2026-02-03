@@ -47,15 +47,26 @@ Now inside the `/bin/sh` shell we run the test cases below.
 
 ```bash
 helm install minimus-manual bitnami/postgresql \
-  -f helm-values/defective-image.yaml \
+  -f helm-values/postgresql-defective-image-values.yaml \
   -n minimus-test --create-namespace
 ```
+
+**Set the default namespace and verify:**
+
+```bash
+kubectl config set-context --current --namespace=minimus-test
+kubectl config view --minify --output 'jsonpath={..namespace}'
+```
+
+The output should be `minimus-test`. Now you can omit `-n minimus-test` from subsequent commands.
 
 **Access the pod shell to run the same tests:**
 
 ```bash
 kubectl exec -it -n minimus-test <pod-name> -c postgresql -- sh
 ```
+
+Replace `<pod-name>` with the actual pod name (e.g. `minimus-manual-postgresql-0`). List pods with `kubectl get pods` if needed.
 
 Or run commands directly:
 
@@ -87,7 +98,7 @@ The same commands are executed in both environments. The table shows the command
 
 **Methodology:** "Black-Box Testing"
 
-We use a Python automation suite (`tests/test_helm_bugs.py`) to deploy the Bitnami PostgreSQL Helm chart with the defective image and validate behavior.
+We use a Python automation suite (`tests/test_postgresql_bugs.py`) to deploy the Bitnami PostgreSQL Helm chart with the defective image and validate behavior.
 
 ### 3.1 Automated Test Cases
 
