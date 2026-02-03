@@ -38,25 +38,39 @@ mkdir: cannot create directory '/bitnami/postgresql/data': Permission denied
 
 ---
 
-### 1.2 Bypass & Inspect — Forensic Analysis
+### 1.2 Bypass & Inspect — Forensic Analysis (Docker vs Kubernetes)
 
-Since the container crashes on startup, we override the entrypoint to inspect the image internals:
+We run the same inspection commands in **two environments** to compare behavior:
 
+**Docker (OCI):**
 ```bash
 docker run --rm -it --entrypoint /bin/sh halex1985/postgresql:latest
 ```
 
-#### Test Results
+**Kubernetes (Helm):**
+```bash
+kubectl exec -it -n minimus-test <pod-name> -c postgresql -- sh
+```
 
-| Test ID | Test Name | Command | Result | Status |
-|---------|-----------|---------|--------|--------|
-| **IMG-01** | OS Distribution Check | `cat /etc/os-release` | `ID=minimos`, `NAME="MinimOS"`, `VERSION_ID="20241031"` | **PASS** (MinimOS is acceptable) |
-| **IMG-02** | Shell Compatibility | `ls -l /bin/bash` | `-rwxr-xr-x 1 root root 1544952 Dec 17 12:25 /bin/bash` | **PASS** |
-| **IMG-03** | Configuration Path | `ls -d /opt/bitnami/postgresql/conf/conf.d` | `/opt/bitnami/postgresql/conf/conf.d` (exists) | **PASS** |
-| **SEC-01** | User Context (1001) | `grep 1001 /etc/passwd` | `postgresql:x:1001:0:Account created by Minimus:/home/postgresql:/bin/sh` | **PASS** |
-| **SEC-02** | Data Dir Permissions | `ls -ld /bitnami/postgresql` | `drwxr-x--- 2 root root 4096 Dec 30 10:07` | **FAIL** |
-| **SEC-03** | Init Scripts Access | `ls -ld /docker-entrypoint-initdb.d/` | `drwx------ 2 root root 4096 Jan  1  1970` | **FAIL** |
-| **SEC-04** | Pre-Init Scripts Access | `ls -ld /docker-entrypoint-preinitdb.d` | `drwx------ 2 root root 4096 Jan  1  1970` | **FAIL** |
+#### Test Results: Docker vs Kubernetes Side-by-Side
+
+| Test ID | Test Name | Command | Docker Result | K8s Result | Docker | K8s |
+|---------|-----------|---------|---------------|------------|--------|-----|
+| **IMG-01** | OS Distribution Check | `cat /etc/os-release` | `ID=minimos`, `NAME="MinimOS"`, `VERSION_ID="20241031"` | Same | **PASS** | **PASS** |
+| **IMG-02** | Shell Compatibility | `ls -l /bin/bash` | `-rwxr-xr-x 1 root root 1544952` | Same | **PASS** | **PASS** |
+| **IMG-03** | Configuration Path | `ls -d .../conf/conf.d` | Exists | Same | **PASS** | **PASS** |
+| **SEC-01** | User Context (1001) | `grep 1001 /etc/passwd` | `postgresql:x:1001:0:...` | Same | **PASS** | **PASS** |
+| **SEC-02** | Data Dir Permissions | `ls -ld /bitnami/postgresql` | `drwxr-x--- root root` | `drwxrwxrwx root root` (PVC) | **FAIL** | **PASS** |
+| **SEC-03** | Init Scripts Access | `ls -ld /docker-entrypoint-initdb.d/` | `drwx------ root root` | Same | **FAIL** | **FAIL** |
+| **SEC-04** | Pre-Init Scripts Access | `ls -ld /docker-entrypoint-preinitdb.d` | `drwx------ root root` | Same | **FAIL** | **FAIL** |
+
+#### Key Observations
+
+- **IMG-01 to SEC-01:** Identical in both environments — these come from the image itself.
+- **SEC-02 (Data Dir):** **Different!**
+  - **Docker:** Image filesystem shows `drwxr-x---` → UID 1001 cannot write → container crashes.
+  - **K8s:** PVC is mounted on `/bitnami/postgresql` with `drwxrwxrwx` → UID 1001 can write → PostgreSQL starts.
+- **SEC-03, SEC-04 (Hook Dirs):** Same in both (`drwx------`) — these are **not** mounted volumes, so the image defect is visible in both. Logs show `find: '...': Permission denied` in both environments.
 
 ---
 
@@ -133,26 +147,68 @@ drwx------ 2 root root 4096 Jan  1  1970 /docker-entrypoint-preinitdb.d
 
 ---
 
-## Part 4: Manual OCI Testing Summary
+## Part 4: Manual Testing Summary (Docker vs Kubernetes)
 
-| Test ID | Test Name | Status | Defect |
-|---------|-----------|--------|--------|
-| **IMG-01** | OS Distribution Check | **PASS** | — |
-| **IMG-02** | Shell Compatibility | **PASS** | — |
-| **IMG-03** | Configuration Path | **PASS** | — |
-| **SEC-01** | User Context (1001) | **PASS** | — |
-| **SEC-02** | Data Dir Permissions | **FAIL** | DEF-01 |
-| **SEC-03** | Init Scripts Access | **FAIL** | DEF-02 |
-| **SEC-04** | Pre-Init Scripts Access | **FAIL** | DEF-02 |
+| Test ID | Test Name | Docker | K8s | Defect | Notes |
+|---------|-----------|--------|-----|--------|-------|
+| **IMG-01** | OS Distribution Check | **PASS** | **PASS** | — | MinimOS in both |
+| **IMG-02** | Shell Compatibility | **PASS** | **PASS** | — | `/bin/bash` exists |
+| **IMG-03** | Configuration Path | **PASS** | **PASS** | — | `conf.d` exists |
+| **SEC-01** | User Context (1001) | **PASS** | **PASS** | — | UID 1001 exists |
+| **SEC-02** | Data Dir Permissions | **FAIL** | **PASS** | DEF-01 | K8s: PVC masks defect |
+| **SEC-03** | Init Scripts Access | **FAIL** | **FAIL** | DEF-02 | `drwx------` in both |
+| **SEC-04** | Pre-Init Scripts Access | **FAIL** | **FAIL** | DEF-02 | `drwx------` in both |
 
-**Manual OCI Testing: COMPLETED**
+**Manual Testing: COMPLETED**
 
 **Total Defects Found:** 2 (DEF-01, DEF-02)
 
+- **DEF-01:** Causes crash on Docker; masked by PVC on K8s.
+- **DEF-02:** Causes "Permission denied" error in logs on both Docker and K8s (non-fatal on K8s).
+
 ---
 
-## Part 5: Helm Testing
+## Part 5: Helm / Kubernetes Testing
 
-*Pending — will be covered by automated test suite (`tests/test_helm_bugs.py`).*
+### 5.1 Deployment Command
 
-Expected outcome: Deployment will enter `CrashLoopBackOff` due to the same permission defects (DEF-01, DEF-02).
+```bash
+helm install minimus-manual bitnami/postgresql \
+  -f helm-values/postgresql-defective-image-values.yaml \
+  -n minimus-test --create-namespace
+```
+
+### 5.2 Observed Behavior
+
+| Aspect | Expected (based on Docker) | Actual (K8s) |
+|--------|---------------------------|--------------|
+| Container startup | Crash (Permission denied) | **Pod runs** — PostgreSQL starts |
+| Data directory | Cannot create `/bitnami/postgresql/data` | **Created successfully** (PVC has `drwxrwxrwx`) |
+| Hook dir errors in logs | `find: '/docker-entrypoint-preinitdb.d/': Permission denied` | **Same error in logs** |
+| Init dir errors in logs | `find: '/docker-entrypoint-initdb.d/': Permission denied` | **Same error in logs** |
+| PostgreSQL status | Never starts | **Starts and accepts connections** |
+
+### 5.3 Root Cause of Difference
+
+The Bitnami Helm chart mounts a **PersistentVolumeClaim (PVC)** on `/bitnami/postgresql`. Kubernetes (via `fsGroup` or default volume permissions) makes this mount world-writable (`drwxrwxrwx`), which **masks** the image defect (DEF-01).
+
+However, the hook directories (`/docker-entrypoint-initdb.d/`, `/docker-entrypoint-preinitdb.d/`) are **not** mounted volumes — they come from the image. So DEF-02 still appears in the logs ("Permission denied" on `find`), but the entrypoint script treats this as non-fatal and continues.
+
+### 5.4 Helm Testing Summary
+
+| Test ID | Test Name | Docker | K8s | Notes |
+|---------|-----------|--------|-----|-------|
+| **SEC-02** | Data Dir Permissions | **FAIL** | **PASS** | PVC masks image defect |
+| **SEC-03** | Init Scripts Access | **FAIL** | **FAIL** | Error in logs, non-fatal |
+| **SEC-04** | Pre-Init Scripts Access | **FAIL** | **FAIL** | Error in logs, non-fatal |
+| **HLM-01** | Pod Running | N/A | **PASS** | Pod runs (but with errors in logs) |
+| **HLM-02** | PVC Write Access | N/A | **PASS** | Data dir created on PVC |
+| **HLM-03** | Liveness Probe | N/A | **PASS** | PostgreSQL responds to `pg_isready` |
+
+### 5.5 Conclusion
+
+- **DEF-01 (Data Dir):** Masked on K8s by PVC; still causes crash on pure Docker.
+- **DEF-02 (Hook Dirs):** Visible in logs on both Docker and K8s; non-fatal on K8s.
+- **Automation:** The automated test suite (`tests/test_postgresql_bugs.py`) checks for "Permission denied" in logs (Test 2) — this **passes** on K8s. Tests that expect pod failure (Tests 1, 3, 4) will **fail** on K8s because the pod is healthy.
+
+**Recommendation for Minimus:** The image defects are real and affect Docker deployments. On K8s, DEF-01 is masked by PVC but DEF-02 is still present (logs show errors). The image should be fixed for both environments to ensure clean logs and consistent behavior.
