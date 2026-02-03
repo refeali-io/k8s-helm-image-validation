@@ -191,7 +191,7 @@ class TestPostgreSQLBugs:
     CHART = "bitnami/postgresql"
     VALUES_FILE = "helm-values/postgresql-defective-image-values.yaml"
     CONTAINER = "postgresql"
-    NAMESPACE = "minimus-test"
+    NAMESPACE = "test-postgre-sql-bugs"
     RELEASE_PREFIX = "pg-test"
 
     # --- Test 1: SEC-04 Pre-Init Scripts Access ---

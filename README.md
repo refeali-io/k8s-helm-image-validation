@@ -91,20 +91,30 @@ flowchart TB
 
 ## Setup
 
-1. **Install Python dependencies**
+1. **Create and activate a virtual environment (recommended)**
+
+   ```bash
+   python -m venv venv
+   # Windows (PowerShell):
+   .\venv\Scripts\Activate.ps1
+   # Windows (cmd) or Linux/macOS:
+   # venv\Scripts\activate  (Windows)   or   source venv/bin/activate  (Linux/macOS)
+   ```
+
+2. **Install Python dependencies**
 
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Add Bitnami Helm repo**
+3. **Add Bitnami Helm repo**
 
    ```bash
    helm repo add bitnami https://charts.bitnami.com/bitnami
    helm repo update
    ```
 
-3. **Ensure cluster is running**
+4. **Ensure cluster is running**
 
    ```bash
    kubectl cluster-info
@@ -173,28 +183,53 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
    pytest --kube-context=docker-desktop
    ```
 
+### GitHub Actions (CI)
+
+The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs all tests against EKS.
+
+- **Trigger:** Push or PR to `main`, or manual `workflow_dispatch`.
+- **Cluster:** `minimus-automation-assignment` in `eu-central-1` (set in workflow `env`).
+- **Context:** The job runs `aws eks update-kubeconfig` then `pytest`; the EKS context is used automatically.
+
+**Required repository secrets:**
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_ACCESS_KEY_ID` | IAM user/role access key with `eks:DescribeCluster` and kubeconfig access. |
+| `AWS_SECRET_ACCESS_KEY` | Corresponding secret key. |
+
+**Optional variables** (override defaults in the workflow): Settings → Actions → Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_REGION` | `eu-central-1` | EKS cluster region. |
+| `EKS_CLUSTER_NAME` | `minimus-automation-assignment` | EKS cluster name. |
+
+Optional: use [OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services) instead of long-lived keys.
+
 ### Option B: AWS (EKS cluster)
+
+Example cluster name: **minimus-automation-assignment** (Frankfurt eu-central-1).
 
 1. **Point kubectl at your EKS cluster**:
 
    ```bash
-   aws eks update-kubeconfig --region <REGION> --name minimus-assignment
+   aws eks update-kubeconfig --region eu-central-1 --name minimus-automation-assignment
    ```
 
-2. **Run tests**:
+2. **Run tests** (use the context name from `kubectl config get-contexts`):
 
    ```bash
-   pytest --kube-context=<your-eks-context-name>
+   pytest --kube-context=arn:aws:eks:eu-central-1:YOUR_ACCOUNT:cluster/minimus-automation-assignment
    ```
 
 ## Tests (PostgreSQL)
 
 | Test | What is tested | Expected |
 |------|----------------|----------|
-| **Test 1** | Pod gets Unhealthy event | Liveness probe failed |
-| **Test 2** | Container logs | Contains "Permission denied" |
-| **Test 3** | Container logs | Contains "cannot create directory" |
-| **Test 4** | Pod Ready condition | Pod never becomes Ready |
+| **Test 1 (SEC-04)** | Pre-init scripts dir `/docker-entrypoint-preinitdb.d` | `ls -ld` shows drwx------; logs contain "Permission denied" for preinitdb.d |
+| **Test 2 (SEC-03)** | Init scripts dir `/docker-entrypoint-initdb.d` | `ls -ld` shows drwx------; logs contain "Permission denied" for initdb.d |
+| **Test 3 (SEC-02)** | Data dir `/bitnami/postgresql` | Documents Docker vs K8s: PVC masks DEF-01 (permissions NOT drwxr-x--- on K8s) |
 
 ## Adding New Tests (e.g., Redis)
 

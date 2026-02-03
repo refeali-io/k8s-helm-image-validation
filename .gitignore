@@ -209,3 +209,9 @@ __marimo__/
 
 # postgress helm chart
 postgresql-chart
+
+# EKS default StorageClass (apply manually: kubectl apply -f storageclass-gp3.yaml)
+storageclass-gp3.yaml
+
+# ns.json
+ns.json
