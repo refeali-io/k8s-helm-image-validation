@@ -1,54 +1,55 @@
 """
 Helm-based automated tests for the minimized PostgreSQL image.
-Validates DEF-02: hook directory permission denied errors visible in container logs.
+Validates DEF-02: hook directory permission denied (preinitdb.d, initdb.d) via
+ls -ld and container logs.
 
-Note on K8s vs Docker behavior:
-- On Docker: Pod crashes (DEF-01 data dir + DEF-02 hook dir both fail)
-- On K8s: Pod starts (PVC masks DEF-01), but DEF-02 still shows in logs
-
-These tests validate defects that are visible on Kubernetes.
+Note on K8s vs Docker:
+- Docker: Pod crashes (DEF-01 + DEF-02).
+- K8s: Pod starts (PVC masks DEF-01); DEF-02 still visible in perms and logs.
 
 Usage:
     pytest --kube-context=docker-desktop
-    pytest tests/test_postgresql_bugs.py::TestPostgreSQLBugs::test_1_sec02_preinitdb_permission_denied_in_logs
+    pytest tests/test_postgresql_bugs.py
 """
+import subprocess
 import time
+from typing import Tuple
 
 import pytest
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Constants
+# -----------------------------------------------------------------------------
+
+# DEF-02: hook dirs have drwx------ root root
+DEFECTIVE_HOOK_DIR_MODE = "drwx------"
+DEFECTIVE_OWNER_GROUP = "root root"
+
+# DEF-01: data dir has drwxr-x--- root root (on Docker; masked by PVC on K8s)
+DEFECTIVE_DATA_DIR_MODE = "drwxr-x---"
+
+
+# -----------------------------------------------------------------------------
+# Helpers: reporting & pod
+# -----------------------------------------------------------------------------
 
 def _report(what: str, expected: str, actual: str) -> None:
-    """Print what is tested, expected, and actual for assignment clarity."""
+    """Print what is tested, expected, and actual."""
     print(f"\n  What is tested: {what}")
     print(f"  Expected:       {expected}")
     print(f"  Actual:         {actual}")
 
 
 def _get_pod_logs(k8s_client, namespace: str, pod_name: str, container: str, tail: int = 200) -> str:
-    """Fetch logs from the specified container."""
+    """Fetch logs from the container."""
     return k8s_client.read_namespaced_pod_log(
-        name=pod_name,
-        namespace=namespace,
-        container=container,
-        tail_lines=tail,
+        name=pod_name, namespace=namespace, container=container, tail_lines=tail
     )
-
-
-def _get_pod_events(k8s_client, namespace: str, pod_name: str):
-    """List events involving the pod (involvedObject)."""
-    events = k8s_client.list_namespaced_event(
-        namespace=namespace,
-        field_selector=f"involvedObject.name={pod_name}",
-    )
-    return events.items
 
 
 def _is_pod_ready(k8s_client, namespace: str, pod_name: str) -> bool:
-    """Return True if pod Ready condition status is True."""
+    """True if pod Ready condition is True."""
     pod = k8s_client.read_namespaced_pod(name=pod_name, namespace=namespace)
     for c in pod.status.conditions or []:
         if c.type == "Ready":
@@ -56,8 +57,10 @@ def _is_pod_ready(k8s_client, namespace: str, pod_name: str) -> bool:
     return False
 
 
-def _wait_for_pod_ready(k8s_client, namespace: str, pod_name: str, timeout_sec: int = 90, poll_sec: float = 2.0) -> bool:
-    """Wait for pod Ready condition (readiness probe). Returns True when ready."""
+def _wait_for_pod_ready(
+    k8s_client, namespace: str, pod_name: str, timeout_sec: int = 90, poll_sec: float = 2.0
+) -> bool:
+    """Wait for pod Ready (readiness probe). Returns True when ready."""
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         if _is_pod_ready(k8s_client, namespace, pod_name):
@@ -66,162 +69,224 @@ def _wait_for_pod_ready(k8s_client, namespace: str, pod_name: str, timeout_sec: 
     return False
 
 
-# =============================================================================
-# TEST CLASS
-# =============================================================================
+def _exec_ls_ld(namespace: str, pod_name: str, container: str, path: str) -> str:
+    """Run ls -ld <path> in the pod. Returns stripped stdout."""
+    result = subprocess.run(
+        ["kubectl", "exec", "-n", namespace, pod_name, "-c", container, "--", "ls", "-ld", path],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return (result.stdout or "").strip()
+
+
+def _parse_ls_ld(line: str) -> Tuple[str, str]:
+    """Parse 'ls -ld' output. Returns (mode, 'owner group')."""
+    parts = line.split()
+    mode = parts[0] if len(parts) >= 1 else ""
+    owner_group = f"{parts[2]} {parts[3]}" if len(parts) >= 4 else ""
+    return mode, owner_group
+
+
+def _assert_hook_dir_permissions(
+    namespace: str,
+    pod_name: str,
+    container: str,
+    path: str,
+    sec_id: str,
+    path_label: str,
+) -> None:
+    """
+    Exec ls -ld <path> in pod, compare to DEF-02 expected (drwx------ root root),
+    report and assert.
+    """
+    ls_output = _exec_ls_ld(namespace, pod_name, container, path)
+    mode, owner_group = _parse_ls_ld(ls_output)
+    actual = f"{mode} {owner_group}"
+    expected = f"{DEFECTIVE_HOOK_DIR_MODE} {DEFECTIVE_OWNER_GROUP}"
+    match = mode == DEFECTIVE_HOOK_DIR_MODE and owner_group == DEFECTIVE_OWNER_GROUP
+
+    _report(
+        f"Directory permissions for {path} ({sec_id}).",
+        f"Defective perms: {expected} (DEF-02).",
+        f"Actual: {actual}",
+    )
+    assert match, f"Expected {expected}; got: {ls_output}"
+
+
+def _assert_data_dir_masked_by_pvc(
+    namespace: str,
+    pod_name: str,
+    container: str,
+    path: str,
+) -> str:
+    """
+    Exec ls -ld <path> (data dir), log the behavioral difference Docker vs K8s,
+    assert that PVC has masked the defect (mode is NOT the defective drwxr-x---).
+    Returns the actual mode for further reporting.
+    """
+    ls_output = _exec_ls_ld(namespace, pod_name, container, path)
+    mode, owner_group = _parse_ls_ld(ls_output)
+    actual = f"{mode} {owner_group}"
+    defective = f"{DEFECTIVE_DATA_DIR_MODE} {DEFECTIVE_OWNER_GROUP}"
+
+    print(f"\n      --- Behavioral Difference: Docker vs K8s ---")
+    print(f"      Docker (image):  {defective}  --> container CRASHES (DEF-01)")
+    print(f"      K8s (PVC mount): {actual}  --> container STARTS (defect masked)")
+    print(f"      -------------------------------------------------")
+
+    _report(
+        f"Directory permissions for {path} (SEC-02).",
+        f"NOT defective ({DEFECTIVE_DATA_DIR_MODE}) – PVC should mask DEF-01.",
+        f"Actual: {actual} (PVC-provided)",
+    )
+
+    is_masked = mode != DEFECTIVE_DATA_DIR_MODE
+    assert is_masked, (
+        f"Expected PVC to mask defect; got defective mode {DEFECTIVE_DATA_DIR_MODE}. "
+        f"ls -ld: {ls_output}"
+    )
+    return actual
+
+
+def _assert_logs_permission_denied_for_path(
+    logs: str,
+    path_substring: str,
+    sec_id: str,
+    path_label: str,
+) -> None:
+    """
+    Assert logs contain 'Permission denied' and path substring; report and assert.
+    """
+    found = "Permission denied" in logs and path_substring in logs
+    what = f"Container logs show 'Permission denied' for {path_label} ({sec_id})."
+    expected = f"Logs contain 'Permission denied' for {path_label}."
+
+    if found:
+        lines = [l for l in logs.split("\n") if "Permission denied" in l and path_substring in l]
+        actual = f"Logs contain 'Permission denied' for {path_label}: {lines[0].strip() if lines else '(found)'}"
+    else:
+        actual = f"Logs do NOT contain expected {path_label} permission error. Snippet: {logs[:300]}"
+
+    _report(what, expected, actual)
+    assert found, f"Expected 'Permission denied' for {path_label} in logs (DEF-02). Snippet: {logs[:500]}"
+
+
+# -----------------------------------------------------------------------------
+# Test class
+# -----------------------------------------------------------------------------
 
 @pytest.mark.helm
 @pytest.mark.defect
 class TestPostgreSQLBugs:
     """
-    Tests that reproduce known defects when deploying the defective PostgreSQL image
-    (halex1985/postgresql:latest) via the Bitnami Helm chart.
+    Defects when deploying halex1985/postgresql:latest via Bitnami Helm chart.
 
-    SEC-02 / DEF-02: Hook directory permissions (/docker-entrypoint-preinitdb.d/)
-    are drwx------ which causes "Permission denied" errors in container logs.
-    
-    This defect is visible on Kubernetes even though the pod starts successfully
-    (because the PVC masks DEF-01 for the data directory).
+    SEC-04 (preinitdb.d) and SEC-03 (initdb.d): hook dirs have drwx------ (DEF-02),
+    visible in ls -ld and in container logs. Pod still starts on K8s (PVC masks DEF-01).
     """
 
-    # =========================================================================
-    # TEST CONFIGURATION (read by conftest.py fixtures)
-    # =========================================================================
     CHART = "bitnami/postgresql"
     VALUES_FILE = "helm-values/postgresql-defective-image-values.yaml"
     CONTAINER = "postgresql"
     NAMESPACE = "minimus-test"
     RELEASE_PREFIX = "pg-test"
 
-    # =========================================================================
-    # TESTS
-    # =========================================================================
+    # --- Test 1: SEC-04 Pre-Init Scripts Access ---
 
-    def test_1_sec02_preinitdb_permission_denied_in_logs(
-        self,
-        helm_release,
-        pod_name,
-        k8s_client,
-        container_name,
+    @pytest.mark.warning
+    def test_1_sec04_preinitdb_permission_denied_in_logs(
+        self, helm_release, pod_name, k8s_client, container_name
     ):
         """
-        Test 1 (SEC-02): Container logs contain 'Permission denied' for hook directory.
-        
-        Validates DEF-02: /docker-entrypoint-preinitdb.d/ has drwx------ permissions,
-        causing 'find: Permission denied' when entrypoint tries to scan it.
-        
-        This test passes on K8s because the defect is visible in logs even though
-        the pod starts successfully (PVC masks DEF-01 but not DEF-02).
+        SEC-04: /docker-entrypoint-preinitdb.d/ has drwx------ (DEF-02).
+        On K8s defect is visible in logs but non-fatal (pod still starts).
+        Asserts ls -ld shows defective perms and logs show 'Permission denied'.
         """
-        print("\n[STEP 1] Resolving release and namespace from helm_release fixture...")
         release_name, namespace = helm_release
-        print(f"         release_name={release_name}, namespace={namespace}")
+        path = "/docker-entrypoint-preinitdb.d"
+        path_label = "preinitdb.d/"
 
-        print("\n[STEP 2] Resolving pod and container...")
-        print(f"         pod_name={pod_name}, container_name={container_name}")
+        print("\n[1/4] Resolving release, namespace, pod, container...")
+        print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
-        print("\n[STEP 3] Waiting for pod readiness (readiness probe / pg_isready)...")
+        print("\n[2/4] Waiting for pod readiness (readiness probe / pg_isready)...")
         ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
-        print(f"         Pod ready: {ready}")
+        print(f"      Pod ready: {ready}")
 
-        print("\n[STEP 4] Fetching container logs from Kubernetes API...")
+        print(f"\n[3/4] Assert directory permissions: ls -ld {path} (SEC-04)...")
+        _assert_hook_dir_permissions(
+            namespace, pod_name, container_name, path, "SEC-04", path_label
+        )
+
+        print("\n[4/4] Assert logs contain 'Permission denied' for preinitdb.d (SEC-04)...")
         logs = _get_pod_logs(k8s_client, namespace, pod_name, container_name)
-        print(f"         Retrieved {len(logs)} characters of log output.")
+        _assert_logs_permission_denied_for_path(
+            logs, "docker-entrypoint-preinitdb.d", "SEC-04", path_label
+        )
+        print("\n      Test 1 (SEC-04) passed.")
 
-        print("\n[STEP 5] Checking logs for 'Permission denied' for /docker-entrypoint-preinitdb.d/ (DEF-02)...")
-        has_preinitdb_perm_denied = "Permission denied" in logs and "docker-entrypoint-preinitdb.d" in logs
+    # --- Test 2: SEC-03 Init Scripts Access ---
 
-        what = "Container logs show 'Permission denied' for /docker-entrypoint-preinitdb.d/ (DEF-02: hook dir)."
-        expected = "Logs contain 'Permission denied' for preinitdb.d/ (find on hook dir)."
+    @pytest.mark.warning
+    def test_2_sec03_initdb_permission_denied_in_logs(
+        self, helm_release, pod_name, k8s_client, container_name
+    ):
+        """
+        SEC-03: /docker-entrypoint-initdb.d/ has drwx------ (DEF-02).
+        On K8s defect is visible in logs but non-fatal (pod still starts).
+        Asserts ls -ld shows defective perms and logs show 'Permission denied'.
+        """
+        release_name, namespace = helm_release
+        path = "/docker-entrypoint-initdb.d"
+        path_label = "initdb.d/"
 
-        if has_preinitdb_perm_denied:
-            perm_lines = [line for line in logs.split('\n') if 'Permission denied' in line and 'preinitdb' in line]
-            actual = f"Logs contain 'Permission denied' for preinitdb.d/: {perm_lines[0].strip() if perm_lines else '(found)'}"
-            print(f"         FOUND: {perm_lines[0].strip() if perm_lines else 'Permission denied (preinitdb.d)'}")
-        else:
-            actual = f"Logs do NOT contain expected preinitdb.d/ permission error. Snippet: {logs[:300]}"
-            print(f"         NOT FOUND. First 200 chars: {logs[:200]}")
+        print("\n[1/4] Resolving release, namespace, pod, container...")
+        print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
-        has_perm_denied = has_preinitdb_perm_denied
+        print("\n[2/4] Waiting for pod readiness (readiness probe / pg_isready)...")
+        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
+        print(f"      Pod ready: {ready}")
 
-        print("\n[STEP 6] Reporting result...")
-        _report(what, expected, actual)
+        print(f"\n[3/4] Assert directory permissions: ls -ld {path} (SEC-03)...")
+        _assert_hook_dir_permissions(
+            namespace, pod_name, container_name, path, "SEC-03", path_label
+        )
 
-        assert has_perm_denied, f"Expected 'Permission denied' for preinitdb.d/ in logs (DEF-02). Snippet: {logs[:500]}"
-        print("\n[STEP 7] Assert passed. Test complete.")
+        print("\n[4/4] Assert logs contain 'Permission denied' for initdb.d (SEC-03)...")
+        logs = _get_pod_logs(k8s_client, namespace, pod_name, container_name)
+        _assert_logs_permission_denied_for_path(
+            logs, "docker-entrypoint-initdb.d", "SEC-03", path_label
+        )
+        print("\n      Test 2 (SEC-03) passed.")
 
-    # def test_2_logs_contain_preinitdb_permission_error(
-    #     self,
-    #     helm_release,
-    #     pod_name,
-    #     k8s_client,
-    #     container_name,
-    # ):
-    #     """
-    #     Test 2 (SEC-02 specific): Logs show permission error for /docker-entrypoint-preinitdb.d/.
-    #     
-    #     More specific check - validates the exact path that has the permission issue.
-    #     """
-    #     release_name, namespace = helm_release
-    #     what = "Container logs show permission error for /docker-entrypoint-preinitdb.d/."
-    #     expected = "Logs contain 'docker-entrypoint-preinitdb.d' and 'Permission denied'."
+    # --- Test 3: SEC-02 Data Dir Permissions (masked by PVC on K8s) ---
 
-    #     logs = _get_pod_logs(k8s_client, namespace, pod_name, container_name)
-    #     has_preinitdb_error = "docker-entrypoint-preinitdb.d" in logs and "Permission denied" in logs
-    #     
-    #     actual = (
-    #         "Logs contain preinitdb.d permission error"
-    #         if has_preinitdb_error
-    #         else f"Expected pattern not found. Log snippet: {logs[:300]}"
-    #     )
-    #     _report(what, expected, actual)
+    @pytest.mark.env_difference
+    def test_3_sec02_data_dir_masked_by_pvc(
+        self, helm_release, pod_name, k8s_client, container_name
+    ):
+        """
+        SEC-02: /bitnami/postgresql has drwxr-x--- in the IMAGE (DEF-01).
+        On K8s, PVC is mounted here with different permissions, masking the defect.
 
-    #     assert has_preinitdb_error, f"Expected preinitdb.d permission error in logs. Snippet: {logs[:500]}"
+        Documents behavioral difference (TEST_REPORT): Docker fails, K8s passes.
+        - Docker: drwxr-x--- → container crashes (UID 1001 cannot write)
+        - K8s: PVC masks defect → container starts successfully
+        """
+        release_name, namespace = helm_release
+        path = "/bitnami/postgresql"
 
-    # def test_3_pod_started_successfully(
-    #     self,
-    #     helm_release,
-    #     pod_name,
-    #     k8s_client,
-    # ):
-    #     """
-    #     Test 3: Pod starts successfully on K8s (PVC masks DEF-01).
-    #     
-    #     This documents the environmental difference: on K8s with PVC, the pod
-    #     starts even though the image has defects. This is expected behavior
-    #     that we want to document - the defect is masked, not fixed.
-    #     """
-    #     release_name, namespace = helm_release
-    #     what = "Pod starts successfully on K8s (PVC masks DEF-01 data dir issue)."
-    #     expected = "Pod is in Running phase."
+        print("\n[1/3] Resolving release, namespace, pod, container...")
+        print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
-    #     pod = k8s_client.read_namespaced_pod(name=pod_name, namespace=namespace)
-    #     phase = pod.status.phase
-    #     actual = f"Pod phase = {phase}."
-    #     _report(what, expected, actual)
+        print("\n[2/3] Waiting for pod readiness (readiness probe / pg_isready)...")
+        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
+        print(f"      Pod ready: {ready}")
 
-    #     assert phase == "Running", f"Expected pod Running; got {phase}."
+        print(f"\n[3/3] Check data dir permissions: ls -ld {path} (SEC-02)...")
+        _assert_data_dir_masked_by_pvc(namespace, pod_name, container_name, path)
 
-    # def test_4_postgresql_ready_despite_image_defects(
-    #     self,
-    #     helm_release,
-    #     pod_name,
-    #     k8s_client,
-    # ):
-    #     """
-    #     Test 4: PostgreSQL becomes Ready on K8s despite image defects.
-    #     
-    #     Documents that on K8s the pod becomes Ready because PVC masks DEF-01.
-    #     The image still has defects (visible in logs), but they don't prevent startup.
-    #     """
-    #     release_name, namespace = helm_release
-    #     what = "Pod becomes Ready on K8s (defects masked by PVC)."
-    #     expected = "Pod Ready condition is True."
-
-    #     # Wait for readiness
-    #     time.sleep(30)
-    #     ready = _is_pod_ready(k8s_client, namespace, pod_name)
-    #     actual = f"Pod Ready = {ready}."
-    #     _report(what, expected, actual)
-
-    #     assert ready, f"Expected pod Ready=True on K8s; got {ready}."
+        print("\n      Test 3 (SEC-02) passed – PVC masked DEF-01, PostgreSQL running.")
