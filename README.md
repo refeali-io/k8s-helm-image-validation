@@ -93,7 +93,7 @@ flowchart TB
 - **CLI tools:** `kubectl` and `helm` v3 in PATH.
 - **Python:** 3.9+
 
-> **Note:** In CI (GitHub Actions), tests run on a **Kind** cluster created by the workflow. You only need Docker Desktop for local development.
+> **Note:** In CI (GitHub Actions), tests run on a **Kind** cluster. Locally you can use Docker Desktop (with Kubernetes), Kind, or Minikube.
 
 ---
 
@@ -191,8 +191,8 @@ If you followed the Quick Start, you're done. This section is for reference.
 # Run all tests (uses config from each test class)
 pytest
 
-# Run with explicit Kubernetes context
-pytest --kube-context=minimus-test
+# Run with explicit Kubernetes context (same as in Quick Start step 8)
+pytest --kube-context=docker-desktop
 
 # Run only PostgreSQL tests
 pytest tests/test_postgresql_bugs.py --kube-context=docker-desktop
@@ -202,18 +202,18 @@ pytest tests/test_postgresql_bugs.py --kube-context=docker-desktop
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--kube-context` | (none) | Kubernetes context to use (e.g. `docker-desktop`, `minimus-test`) |
+| `--kube-context` | (none) | Kubernetes context to use (e.g. `docker-desktop` locally, `kind-minimus-test` in CI) |
 
 ### Setting the Kubernetes context (important)
 
-The cluster you run against depends on your **current kubectl context**. On a new or shared env, the default context may be wrong. Set it **before** tests run:
+The cluster you run against depends on your **current kubectl context**. Use the same context you set up in the Quick Start (e.g. `docker-desktop` for local). If the default context is wrong, set it before tests run:
 
 ```bash
 # Option 1: Set context via pytest (recommended for automation)
-pytest --kube-context=minimus-test
+pytest --kube-context=docker-desktop
 
 # Option 2: Set context in the shell first, then run pytest
-kubectl config use-context minimus-test
+kubectl config use-context docker-desktop
 pytest
 ```
 
@@ -238,26 +238,20 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
 
 ## Environment Options
 
-### Locally (Docker Desktop Kubernetes)
+### Locally (Docker Desktop, Kind, or Minikube)
 
-**Requirements:**
-- Docker Desktop installed and running
-- Kubernetes enabled in Docker Desktop (Settings → Kubernetes → Enable Kubernetes → Apply & Restart)
-- Wait until the Kubernetes status shows green/running
+You can run the tests against any local Kubernetes cluster. Use the **Quick Start** above for full setup steps; the only difference is which context you pass to pytest.
 
-**Context:** When you enable Kubernetes, Docker Desktop automatically creates a kubectl context named `docker-desktop`. No manual context creation is needed.
+| Option | Context name | Notes |
+|--------|--------------|--------|
+| **Docker Desktop** (K8s built-in) | `docker-desktop` | Enable in Settings → Kubernetes. Context is created automatically. |
+| **Kind** | `kind-<cluster-name>` (e.g. `kind-minimus-test`) | Create a cluster with `kind create cluster [--name <name>]`. |
+| **Minikube** | `minikube` | Start with `minikube start`. Context is created automatically. |
 
-**Verify the cluster is ready:**
-
-```bash
-kubectl cluster-info
-kubectl config current-context   # should print: docker-desktop
-```
-
-**Run tests:**
+After your cluster is running, use the context from the table:
 
 ```bash
-pytest --kube-context=docker-desktop
+pytest --kube-context=docker-desktop    # or kind-minimus-test, minikube, etc.
 ```
 
 ### GitHub Actions (CI)
