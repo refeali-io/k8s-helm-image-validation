@@ -15,6 +15,7 @@ import subprocess
 import time
 from typing import Tuple
 
+import allure
 import pytest
 
 
@@ -31,9 +32,10 @@ DEFECTIVE_DATA_DIR_MODE = "drwxr-x---"
 
 
 # -----------------------------------------------------------------------------
-# Helpers: reporting & pod
+# Helpers: reporting & pod (decorated with @allure.step)
 # -----------------------------------------------------------------------------
 
+@allure.step("Report: {what}")
 def _report(what: str, expected: str, actual: str) -> None:
     """Print what is tested, expected, and actual."""
     print(f"\n  What is tested: {what}")
@@ -41,6 +43,7 @@ def _report(what: str, expected: str, actual: str) -> None:
     print(f"  Actual:         {actual}")
 
 
+@allure.step("Fetch container logs (tail={tail})")
 def _get_pod_logs(k8s_client, namespace: str, pod_name: str, container: str, tail: int = 200) -> str:
     """Fetch logs from the container."""
     return k8s_client.read_namespaced_pod_log(
@@ -48,6 +51,7 @@ def _get_pod_logs(k8s_client, namespace: str, pod_name: str, container: str, tai
     )
 
 
+@allure.step("Check if pod is ready")
 def _is_pod_ready(k8s_client, namespace: str, pod_name: str) -> bool:
     """True if pod Ready condition is True."""
     pod = k8s_client.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -57,6 +61,7 @@ def _is_pod_ready(k8s_client, namespace: str, pod_name: str) -> bool:
     return False
 
 
+@allure.step("Wait for pod readiness (timeout={timeout_sec}s)")
 def _wait_for_pod_ready(
     k8s_client, namespace: str, pod_name: str, timeout_sec: int = 90, poll_sec: float = 2.0
 ) -> bool:
@@ -69,6 +74,7 @@ def _wait_for_pod_ready(
     return False
 
 
+@allure.step("Execute: kubectl exec ls -ld {path}")
 def _exec_ls_ld(namespace: str, pod_name: str, container: str, path: str) -> str:
     """Run ls -ld <path> in the pod. Returns stripped stdout."""
     result = subprocess.run(
@@ -82,6 +88,7 @@ def _exec_ls_ld(namespace: str, pod_name: str, container: str, path: str) -> str
     return (result.stdout or "").strip()
 
 
+@allure.step("Parse ls -ld output")
 def _parse_ls_ld(line: str) -> Tuple[str, str]:
     """Parse 'ls -ld' output. Returns (mode, 'owner group')."""
     parts = line.split()
@@ -90,6 +97,7 @@ def _parse_ls_ld(line: str) -> Tuple[str, str]:
     return mode, owner_group
 
 
+@allure.step("Assert hook dir permissions: {path} ({sec_id})")
 def _assert_hook_dir_permissions(
     namespace: str,
     pod_name: str,
@@ -116,6 +124,7 @@ def _assert_hook_dir_permissions(
     assert match, f"Expected {expected}; got: {ls_output}"
 
 
+@allure.step("Assert data dir masked by PVC: {path}")
 def _assert_data_dir_masked_by_pvc(
     namespace: str,
     pod_name: str,
@@ -151,6 +160,7 @@ def _assert_data_dir_masked_by_pvc(
     return actual
 
 
+@allure.step("Assert logs contain 'Permission denied' for {path_label} ({sec_id})")
 def _assert_logs_permission_denied_for_path(
     logs: str,
     path_substring: str,
@@ -180,6 +190,8 @@ def _assert_logs_permission_denied_for_path(
 
 @pytest.mark.helm
 @pytest.mark.defect
+@allure.epic("Minimus PostgreSQL Image Validation")
+@allure.feature("Permission Defects (DEF-01, DEF-02)")
 class TestPostgreSQLBugs:
     """
     Defects when deploying halex1985/postgresql:latest via Bitnami Helm chart.
@@ -191,20 +203,25 @@ class TestPostgreSQLBugs:
     CHART = "bitnami/postgresql"
     VALUES_FILE = "helm-values/postgresql-defective-image-values.yaml"
     CONTAINER = "postgresql"
-    NAMESPACE = "minimus-test"
+    NAMESPACE = "test-postgre-sql-bugs"
     RELEASE_PREFIX = "pg-test"
 
     # --- Test 1: SEC-04 Pre-Init Scripts Access ---
 
     @pytest.mark.warning
+    @allure.story("SEC-04: Pre-init scripts directory access")
+    @allure.title("SEC-04: Pre-init dir permissions and Permission denied in logs")
+    @allure.description(
+        "SEC-04: /docker-entrypoint-preinitdb.d/ has drwx------ (DEF-02). "
+        "On K8s defect is visible in logs but non-fatal (pod still starts). "
+        "Asserts ls -ld shows defective perms and logs show 'Permission denied'."
+    )
+    @allure.severity(allure.severity_level.MINOR)
+    @allure.issue("docs/TEST_REPORT.md", name="TEST_REPORT – DEF-02")
+    @allure.testcase("docs/TEST_PLAN.md", name="TEST_PLAN – SEC-04")
     def test_1_sec04_preinitdb_permission_denied_in_logs(
         self, helm_release, pod_name, k8s_client, container_name
     ):
-        """
-        SEC-04: /docker-entrypoint-preinitdb.d/ has drwx------ (DEF-02).
-        On K8s defect is visible in logs but non-fatal (pod still starts).
-        Asserts ls -ld shows defective perms and logs show 'Permission denied'.
-        """
         release_name, namespace = helm_release
         path = "/docker-entrypoint-preinitdb.d"
         path_label = "preinitdb.d/"
@@ -231,14 +248,19 @@ class TestPostgreSQLBugs:
     # --- Test 2: SEC-03 Init Scripts Access ---
 
     @pytest.mark.warning
+    @allure.story("SEC-03: Init scripts directory access")
+    @allure.title("SEC-03: Init dir permissions and Permission denied in logs")
+    @allure.description(
+        "SEC-03: /docker-entrypoint-initdb.d/ has drwx------ (DEF-02). "
+        "On K8s defect is visible in logs but non-fatal (pod still starts). "
+        "Asserts ls -ld shows defective perms and logs show 'Permission denied'."
+    )
+    @allure.severity(allure.severity_level.MINOR)
+    @allure.issue("docs/TEST_REPORT.md", name="TEST_REPORT – DEF-02")
+    @allure.testcase("docs/TEST_PLAN.md", name="TEST_PLAN – SEC-03")
     def test_2_sec03_initdb_permission_denied_in_logs(
         self, helm_release, pod_name, k8s_client, container_name
     ):
-        """
-        SEC-03: /docker-entrypoint-initdb.d/ has drwx------ (DEF-02).
-        On K8s defect is visible in logs but non-fatal (pod still starts).
-        Asserts ls -ld shows defective perms and logs show 'Permission denied'.
-        """
         release_name, namespace = helm_release
         path = "/docker-entrypoint-initdb.d"
         path_label = "initdb.d/"
@@ -265,17 +287,19 @@ class TestPostgreSQLBugs:
     # --- Test 3: SEC-02 Data Dir Permissions (masked by PVC on K8s) ---
 
     @pytest.mark.env_difference
+    @allure.story("SEC-02: Data directory permissions (PVC masks DEF-01)")
+    @allure.title("SEC-02: Data dir masked by PVC on K8s (DEF-01 not visible)")
+    @allure.description(
+        "SEC-02: /bitnami/postgresql has drwxr-x--- in the IMAGE (DEF-01). "
+        "On K8s, PVC is mounted here with different permissions, masking the defect. "
+        "Documents behavioral difference: Docker fails (container crashes), K8s passes (PVC masks DEF-01)."
+    )
+    @allure.severity(allure.severity_level.CRITICAL)
+    @allure.issue("docs/TEST_REPORT.md", name="TEST_REPORT – DEF-01")
+    @allure.testcase("docs/TEST_PLAN.md", name="TEST_PLAN – SEC-02")
     def test_3_sec02_data_dir_masked_by_pvc(
         self, helm_release, pod_name, k8s_client, container_name
     ):
-        """
-        SEC-02: /bitnami/postgresql has drwxr-x--- in the IMAGE (DEF-01).
-        On K8s, PVC is mounted here with different permissions, masking the defect.
-
-        Documents behavioral difference (TEST_REPORT): Docker fails, K8s passes.
-        - Docker: drwxr-x--- → container crashes (UID 1001 cannot write)
-        - K8s: PVC masks defect → container starts successfully
-        """
         release_name, namespace = helm_release
         path = "/bitnami/postgresql"
 

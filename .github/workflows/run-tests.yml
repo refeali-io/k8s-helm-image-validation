@@ -1,0 +1,135 @@
+# Run Helm-based tests in CI (Kind), upload Allure results, deploy report to GitHub Pages.
+# For branch-based Pages: Settings > Pages > Source: Deploy from branch > gh-pages.
+
+name: Run tests (Kind)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
+
+env:
+  KIND_CLUSTER_NAME: minimus-test
+
+jobs:
+  test:
+    name: Run QA Tests
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: latest
+
+      - name: Add Bitnami Helm repo
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Run tests
+        run: |
+          mkdir -p allure-results
+          pytest --kube-context=kind-${{ env.KIND_CLUSTER_NAME }}
+        # Allure data written to allure-results/ (pytest.ini)
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results
+          path: allure-results/
+          retention-days: 3
+
+  deploy-report:
+    name: Deploy Allure Report to Pages
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Allure results
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+
+      - name: Install Allure CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre unzip wget
+          wget https://github.com/allure-framework/allure2/releases/download/2.35.1/allure-2.35.1.zip
+          unzip -q allure-2.35.1.zip -d /opt/allure
+          sudo ln -sf /opt/allure/allure-2.35.1/bin/allure /usr/bin/allure
+
+      - name: Restore history from gh-pages
+        run: |
+          git fetch origin gh-pages 2>/dev/null || true
+          if git ls-tree -r origin/gh-pages --name-only 2>/dev/null | grep -q "^history/"; then
+            git checkout origin/gh-pages -- history 2>/dev/null || true
+            mkdir -p allure-results/history
+            cp -r history/* allure-results/history/ 2>/dev/null || true
+          fi
+
+      - name: Generate Allure Report
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./allure-report
+          publish_branch: gh-pages
+
+      - name: Comment PR with Allure Report link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const [owner, repo] = '${{ github.repository }}'.split('/');
+            const reportUrl = `https://${owner}.github.io/${repo}/`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `**Allure Report is ready!**\n\n${reportUrl}`
+            });
+
+      - name: Add Action Summary
+        run: |
+          REPO="${{ github.repository }}"
+          OWNER="${REPO%%/*}"
+          NAME="${REPO#*/}"
+          echo "## Allure Report" >> $GITHUB_STEP_SUMMARY
+          echo "**https://${OWNER}.github.io/${NAME}/**" >> $GITHUB_STEP_SUMMARY

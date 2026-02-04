@@ -15,6 +15,8 @@ Generic Helm-based test infrastructure for validating minimized container images
 
 ```
 minimus-assignment/
+├── .github/workflows/
+│   └── run-tests.yml               # CI: Kind cluster + pytest
 ├── helm-values/                    # Values files (external data)
 │   └── postgresql-defective-image-values.yaml
 ├── tests/
@@ -67,7 +69,7 @@ flowchart TB
         end
     end
 
-    subgraph k8s [Kubernetes - AWS EKS]
+    subgraph k8s [Kubernetes - Kind local/CI]
         namespace[Namespace minimus-test]
         pod[Pod under test]
     end
@@ -81,7 +83,7 @@ flowchart TB
     helmRelease --> k8s
 ```
 
-*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster (e.g. AWS EKS).*
+*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster (Kind for local/CI). On scaling, the cluster will be raised on AWS (e.g. EKS).*
 
 ## Prerequisites
 
@@ -91,20 +93,30 @@ flowchart TB
 
 ## Setup
 
-1. **Install Python dependencies**
+1. **Create and activate a virtual environment (recommended)**
+
+   ```bash
+   python -m venv venv
+   # Windows (PowerShell):
+   .\venv\Scripts\Activate.ps1
+   # Windows (cmd) or Linux/macOS:
+   # venv\Scripts\activate  (Windows)   or   source venv/bin/activate  (Linux/macOS)
+   ```
+
+2. **Install Python dependencies**
 
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Add Bitnami Helm repo**
+3. **Add Bitnami Helm repo**
 
    ```bash
    helm repo add bitnami https://charts.bitnami.com/bitnami
    helm repo update
    ```
 
-3. **Ensure cluster is running**
+4. **Ensure cluster is running**
 
    ```bash
    kubectl cluster-info
@@ -146,6 +158,8 @@ pytest
 
 With `--kube-context`, the framework runs `kubectl config use-context <name>` once at session start, before any Helm or Kubernetes API calls.
 
+**Allure:** Pytest is configured in `pytest.ini` to write Allure results to `allure-results/` (`--alluredir=allure-results --clean-alluredir`). In CI, results are uploaded and the report is published to GitHub Pages. Locally, install the [Allure CLI](https://allurereport.org/docs/getting-started/installation/) and run `allure serve allure-results` after `pytest` to view the report in the browser.
+
 ### Kubernetes probes (nice to have for testing)
 
 Tests wait for **pod Ready** (readiness probe). It helps to know how probes interact:
@@ -163,7 +177,7 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
 
 ## Environment Options
 
-### Option A: Locally (Docker Desktop Kubernetes)
+### Locally (Docker Desktop Kubernetes)
 
 1. **Enable Kubernetes in Docker Desktop**: Settings -> Kubernetes -> Enable Kubernetes -> Apply.
 
@@ -173,28 +187,45 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
    pytest --kube-context=docker-desktop
    ```
 
-### Option B: AWS (EKS cluster)
+### GitHub Actions (CI)
 
-1. **Point kubectl at your EKS cluster**:
+The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs the same tests in CI using a **Kind** (Kubernetes in Docker) cluster, then publishes an **Allure** report to **GitHub Pages**. No AWS or EKS.
 
-   ```bash
-   aws eks update-kubeconfig --region <REGION> --name minimus-assignment
-   ```
+**Triggers:** Push or pull request to **main** (excluding `README.md`-only changes), or manual **workflow_dispatch**.
 
-2. **Run tests**:
+**Job 1 – Run QA Tests**
 
-   ```bash
-   pytest --kube-context=<your-eks-context-name>
-   ```
+1. **Checkout** — repository is cloned on a fresh Ubuntu runner (Docker is already installed).
+2. **Create Kind cluster** — [helm/kind-action](https://github.com/marketplace/actions/kind-cluster) creates a cluster with a fixed name (`KIND_CLUSTER_NAME`, default `minimus-test`). The kubeconfig context is `kind-<name>` (e.g. `kind-minimus-test`).
+3. **Python & deps** — virtualenv and `pip install -r requirements.txt` (includes `allure-pytest`).
+4. **Helm** — Helm CLI is installed; Bitnami repo is added.
+5. **Run tests** — `pytest --kube-context=kind-<name>` runs against the Kind cluster. Pytest is configured in `pytest.ini` to write Allure data to `allure-results/` (`--alluredir=allure-results --clean-alluredir`). The test class installs the chart, runs assertions, and uninstalls.
+6. **Upload Allure results** — the `allure-results/` directory is uploaded as an artifact (`if: always()` so it runs even if tests fail). Retention: 3 days.
+
+**Job 2 – Deploy Allure Report to Pages** (runs after the test job, `if: always()`)
+
+1. **Checkout** (with `fetch-depth: 0` for history).
+2. **Download Allure results** — artifact from the test job.
+3. **Install Allure CLI** — Java + [Allure 2.35.1](https://github.com/allure-framework/allure2/releases) so we can generate the HTML report.
+4. **Restore history from gh-pages** — if the `gh-pages` branch already has a `history/` directory, it is copied into `allure-results/history` so the new report keeps trend history.
+5. **Generate Allure Report** — `allure generate allure-results --clean -o allure-report`.
+6. **Deploy to GitHub Pages** — [peaceiris/actions-gh-pages](https://github.com/peaceiris/actions-gh-pages) publishes `./allure-report` to the **gh-pages** branch. The report is then available at `https://<owner>.github.io/<repo>/`.
+7. **Comment PR with Allure Report link** — on `pull_request` events, a comment is added to the PR with the report URL.
+8. **Add Action Summary** — the run summary in the Actions tab includes the report link.
+
+**One-time setup:** In the repository **Settings → Pages**, set **Source** to “Deploy from a branch” and choose branch **gh-pages** (folder `/ (root)`). The first successful run of the deploy job will create the branch and the report URL.
+
+**To change the cluster name:** set the `KIND_CLUSTER_NAME` env var at the top of the workflow. The same value is used for the Kind cluster and for `--kube-context=kind-$KIND_CLUSTER_NAME`.
+
+**Allure locally:** To generate and view the report on your machine, install the [Allure CLI](https://allurereport.org/docs/getting-started/installation/) (requires Java), then run `pytest` and `allure serve allure-results`.
 
 ## Tests (PostgreSQL)
 
 | Test | What is tested | Expected |
 |------|----------------|----------|
-| **Test 1** | Pod gets Unhealthy event | Liveness probe failed |
-| **Test 2** | Container logs | Contains "Permission denied" |
-| **Test 3** | Container logs | Contains "cannot create directory" |
-| **Test 4** | Pod Ready condition | Pod never becomes Ready |
+| **Test 1 (SEC-04)** | Pre-init scripts dir `/docker-entrypoint-preinitdb.d` | `ls -ld` shows drwx------; logs contain "Permission denied" for preinitdb.d |
+| **Test 2 (SEC-03)** | Init scripts dir `/docker-entrypoint-initdb.d` | `ls -ld` shows drwx------; logs contain "Permission denied" for initdb.d |
+| **Test 3 (SEC-02)** | Data dir `/bitnami/postgresql` | Documents Docker vs K8s: PVC masks DEF-01 (permissions NOT drwxr-x--- on K8s) |
 
 ## Adding New Tests (e.g., Redis)
 
