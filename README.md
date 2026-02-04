@@ -72,7 +72,7 @@ flowchart TB
     subgraph k8s [Kubernetes]
         k8sLocal["Local: Docker Desktop K8s"]
         k8sCI["CI: Kind cluster"]
-        namespace[Namespace minimus-test]
+        namespace[Namespace test-postgre-sql-bugs]
         pod[Pod under test]
     end
 
