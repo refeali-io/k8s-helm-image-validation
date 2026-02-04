@@ -15,6 +15,8 @@ Generic Helm-based test infrastructure for validating minimized container images
 
 ```
 minimus-assignment/
+├── .github/workflows/
+│   └── run-tests.yml               # CI: Kind cluster + pytest
 ├── helm-values/                    # Values files (external data)
 │   └── postgresql-defective-image-values.yaml
 ├── tests/
@@ -173,7 +175,7 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
 
 ## Environment Options
 
-### Option A: Locally (Docker Desktop Kubernetes)
+### Locally (Docker Desktop Kubernetes)
 
 1. **Enable Kubernetes in Docker Desktop**: Settings -> Kubernetes -> Enable Kubernetes -> Apply.
 
@@ -183,45 +185,23 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
    pytest --kube-context=docker-desktop
    ```
 
+=======
 ### GitHub Actions (CI)
 
-The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs all tests against EKS.
+The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs the same tests in CI using a **Kind** (Kubernetes in Docker) cluster—no AWS or EKS.
 
-- **Trigger:** Push or PR to `main`, or manual `workflow_dispatch`.
-- **Cluster:** `minimus-automation-assignment` in `eu-central-1` (set in workflow `env`).
-- **Context:** The job runs `aws eks update-kubeconfig` then `pytest`; the EKS context is used automatically.
+**Triggers:** Push or pull request to **main**, or manual **workflow_dispatch**.
 
-**Required repository secrets:**
+**What happens:**
 
-| Secret | Description |
-|--------|-------------|
-| `AWS_ACCESS_KEY_ID` | IAM user/role access key with `eks:DescribeCluster` and kubeconfig access. |
-| `AWS_SECRET_ACCESS_KEY` | Corresponding secret key. |
+1. **Checkout** — repository is cloned on a fresh Ubuntu runner (Docker is already installed).
+2. **Create Kind cluster** — [helm/kind-action](https://github.com/marketplace/actions/kind-cluster) creates a cluster with a fixed name (`KIND_CLUSTER_NAME`, default `minimus-test`). The kubeconfig context is `kind-<name>` (e.g. `kind-minimus-test`).
+3. **Python & deps** — virtualenv and `pip install -r requirements.txt`.
+4. **Helm** — Helm CLI is installed; Bitnami repo is added.
+5. **Run tests** — `pytest tests/test_postgresql_bugs.py --kube-context=kind-<name>` runs against the Kind cluster. The test class installs the chart, runs assertions, and uninstalls; the framework uses the same context you pass.
+6. **Cleanup** — when the job finishes, the runner is destroyed, so the Kind cluster and all resources are removed automatically. No explicit teardown step is needed.
 
-**Optional variables** (override defaults in the workflow): Settings → Actions → Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AWS_REGION` | `eu-central-1` | EKS cluster region. |
-| `EKS_CLUSTER_NAME` | `minimus-automation-assignment` | EKS cluster name. |
-
-Optional: use [OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services) instead of long-lived keys.
-
-### Option B: AWS (EKS cluster)
-
-Example cluster name: **minimus-automation-assignment** (Frankfurt eu-central-1).
-
-1. **Point kubectl at your EKS cluster**:
-
-   ```bash
-   aws eks update-kubeconfig --region eu-central-1 --name minimus-automation-assignment
-   ```
-
-2. **Run tests** (use the context name from `kubectl config get-contexts`):
-
-   ```bash
-   pytest --kube-context=arn:aws:eks:eu-central-1:YOUR_ACCOUNT:cluster/minimus-automation-assignment
-   ```
+**To change the cluster name:** set the `KIND_CLUSTER_NAME` env var at the top of the workflow (e.g. to `minimus-test`). The same value is used for the Kind cluster and for `--kube-context=kind-$KIND_CLUSTER_NAME`, so the pipeline stays consistent.
 
 ## Tests (PostgreSQL)
 
