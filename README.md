@@ -158,6 +158,8 @@ pytest
 
 With `--kube-context`, the framework runs `kubectl config use-context <name>` once at session start, before any Helm or Kubernetes API calls.
 
+**Allure:** Pytest is configured in `pytest.ini` to write Allure results to `allure-results/` (`--alluredir=allure-results --clean-alluredir`). In CI, results are uploaded and the report is published to GitHub Pages. Locally, install the [Allure CLI](https://allurereport.org/docs/getting-started/installation/) and run `allure serve allure-results` after `pytest` to view the report in the browser.
+
 ### Kubernetes probes (nice to have for testing)
 
 Tests wait for **pod Ready** (readiness probe). It helps to know how probes interact:
@@ -185,23 +187,37 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
    pytest --kube-context=docker-desktop
    ```
 
-=======
 ### GitHub Actions (CI)
 
-The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs the same tests in CI using a **Kind** (Kubernetes in Docker) cluster—no AWS or EKS.
+The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs the same tests in CI using a **Kind** (Kubernetes in Docker) cluster, then publishes an **Allure** report to **GitHub Pages**. No AWS or EKS.
 
-**Triggers:** Push or pull request to **main**, or manual **workflow_dispatch**.
+**Triggers:** Push or pull request to **main** (excluding `README.md`-only changes), or manual **workflow_dispatch**.
 
-**What happens:**
+**Job 1 – Run QA Tests**
 
 1. **Checkout** — repository is cloned on a fresh Ubuntu runner (Docker is already installed).
 2. **Create Kind cluster** — [helm/kind-action](https://github.com/marketplace/actions/kind-cluster) creates a cluster with a fixed name (`KIND_CLUSTER_NAME`, default `minimus-test`). The kubeconfig context is `kind-<name>` (e.g. `kind-minimus-test`).
-3. **Python & deps** — virtualenv and `pip install -r requirements.txt`.
+3. **Python & deps** — virtualenv and `pip install -r requirements.txt` (includes `allure-pytest`).
 4. **Helm** — Helm CLI is installed; Bitnami repo is added.
-5. **Run tests** — `pytest tests/test_postgresql_bugs.py --kube-context=kind-<name>` runs against the Kind cluster. The test class installs the chart, runs assertions, and uninstalls; the framework uses the same context you pass.
-6. **Cleanup** — when the job finishes, the runner is destroyed, so the Kind cluster and all resources are removed automatically. No explicit teardown step is needed.
+5. **Run tests** — `pytest --kube-context=kind-<name>` runs against the Kind cluster. Pytest is configured in `pytest.ini` to write Allure data to `allure-results/` (`--alluredir=allure-results --clean-alluredir`). The test class installs the chart, runs assertions, and uninstalls.
+6. **Upload Allure results** — the `allure-results/` directory is uploaded as an artifact (`if: always()` so it runs even if tests fail). Retention: 3 days.
 
-**To change the cluster name:** set the `KIND_CLUSTER_NAME` env var at the top of the workflow (e.g. to `minimus-test`). The same value is used for the Kind cluster and for `--kube-context=kind-$KIND_CLUSTER_NAME`, so the pipeline stays consistent.
+**Job 2 – Deploy Allure Report to Pages** (runs after the test job, `if: always()`)
+
+1. **Checkout** (with `fetch-depth: 0` for history).
+2. **Download Allure results** — artifact from the test job.
+3. **Install Allure CLI** — Java + [Allure 2.35.1](https://github.com/allure-framework/allure2/releases) so we can generate the HTML report.
+4. **Restore history from gh-pages** — if the `gh-pages` branch already has a `history/` directory, it is copied into `allure-results/history` so the new report keeps trend history.
+5. **Generate Allure Report** — `allure generate allure-results --clean -o allure-report`.
+6. **Deploy to GitHub Pages** — [peaceiris/actions-gh-pages](https://github.com/peaceiris/actions-gh-pages) publishes `./allure-report` to the **gh-pages** branch. The report is then available at `https://<owner>.github.io/<repo>/`.
+7. **Comment PR with Allure Report link** — on `pull_request` events, a comment is added to the PR with the report URL.
+8. **Add Action Summary** — the run summary in the Actions tab includes the report link.
+
+**One-time setup:** In the repository **Settings → Pages**, set **Source** to “Deploy from a branch” and choose branch **gh-pages** (folder `/ (root)`). The first successful run of the deploy job will create the branch and the report URL.
+
+**To change the cluster name:** set the `KIND_CLUSTER_NAME` env var at the top of the workflow. The same value is used for the Kind cluster and for `--kube-context=kind-$KIND_CLUSTER_NAME`.
+
+**Allure locally:** To generate and view the report on your machine, install the [Allure CLI](https://allurereport.org/docs/getting-started/installation/) (requires Java), then run `pytest` and `allure serve allure-results`.
 
 ## Tests (PostgreSQL)
 

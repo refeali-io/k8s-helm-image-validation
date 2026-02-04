@@ -215,3 +215,7 @@ storageclass-gp3.yaml
 
 # ns.json
 ns.json
+
+# Allure report output
+allure-results/
+allure-report/
