@@ -97,7 +97,7 @@ flowchart TB
 
 ---
 
-## Quick Start (New Developer / DevOps)
+## Quick Start
 
 Complete steps to run the tests from scratch on a fresh machine.
 
@@ -291,6 +291,52 @@ The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) 
 **To change the cluster name:** set the `KIND_CLUSTER_NAME` env var at the top of the workflow. The same value is used for the Kind cluster and for `--kube-context=kind-$KIND_CLUSTER_NAME`.
 
 **Allure locally:** To generate and view the report on your machine, install the [Allure CLI](https://allurereport.org/docs/getting-started/installation/) (requires Java), then run `pytest` and `allure serve allure-results`.
+
+## Troubleshooting
+
+### Default namespace stuck on the test namespace
+
+If you stopped tests mid-run or ran `kubectl` with a namespace set, your context may have **NAMESPACE** set to the test namespace (e.g. `test-postgre-sql-bugs`). You’ll see it when you run `kubectl config get-contexts`. The namespace name comes from the test class `NAMESPACE` attribute (e.g. in `tests/test_postgresql_bugs.py` it is `test-postgre-sql-bugs`). To clear it:
+
+```bash
+kubectl config set-context docker-desktop --namespace=
+```
+
+Or set the default namespace to `default`:
+
+```bash
+kubectl config set-context --current --namespace=default
+```
+
+Check with `kubectl config get-contexts` — the NAMESPACE column for your context should be empty or `default`.
+
+### Leftover test namespace after stopping tests
+
+If tests were interrupted (e.g. Ctrl+C), the test namespace may still exist in the cluster. The name is defined by the test class `NAMESPACE` attribute (e.g. `test-postgre-sql-bugs` for the PostgreSQL tests). To remove it:
+
+```bash
+kubectl delete namespace <namespace-name>
+```
+
+Example for the PostgreSQL test class:
+
+```bash
+kubectl delete namespace test-postgre-sql-bugs
+```
+
+If the namespace stays in **Terminating** and never goes away, a finalizer is blocking teardown. Force-remove finalizers so the namespace can be deleted:
+
+```bash
+kubectl patch namespace <namespace-name> -p '{"metadata":{"finalizers":[]}}' --type=merge
+```
+
+Example:
+
+```bash
+kubectl patch namespace test-postgre-sql-bugs -p '{"metadata":{"finalizers":[]}}' --type=merge
+```
+
+After that, the namespace should disappear. If it still sticks, run `kubectl get namespace <namespace-name> -o yaml` and check `status` and any remaining `finalizers` or stuck resources.
 
 ## Tests (PostgreSQL)
 
