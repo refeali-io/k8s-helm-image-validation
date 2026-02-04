@@ -69,7 +69,7 @@ flowchart TB
         end
     end
 
-    subgraph k8s [Kubernetes - AWS EKS]
+    subgraph k8s [Kubernetes - Kind local/CI]
         namespace[Namespace minimus-test]
         pod[Pod under test]
     end
@@ -83,7 +83,7 @@ flowchart TB
     helmRelease --> k8s
 ```
 
-*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster (e.g. AWS EKS).*
+*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster (Kind for local/CI). On scaling, the cluster will be raised on AWS (e.g. EKS).*
 
 ## Prerequisites
 
