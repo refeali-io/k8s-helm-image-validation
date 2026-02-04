@@ -69,7 +69,9 @@ flowchart TB
         end
     end
 
-    subgraph k8s [Kubernetes - Kind local/CI]
+    subgraph k8s [Kubernetes]
+        k8sLocal["Local: Docker Desktop K8s"]
+        k8sCI["CI: Kind cluster"]
         namespace[Namespace minimus-test]
         pod[Pod under test]
     end
@@ -83,44 +85,103 @@ flowchart TB
     helmRelease --> k8s
 ```
 
-*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster (Kind for local/CI). On scaling, the cluster will be raised on AWS (e.g. EKS).*
+*Flow: CLI context → k8s client; test class config → helm_release → tests; both k8s_client and helm_release talk to the Kubernetes cluster. Locally we use Docker Desktop with built-in Kubernetes; in CI we use Kind. On scaling, the cluster will be raised on AWS (e.g. EKS).*
 
 ## Prerequisites
 
-- **Kubernetes:** Local cluster (Docker Desktop with Kubernetes, Minikube, or Kind).
-- **CLI:** `kubectl` and `helm` v3 in PATH; kubeconfig pointing at the cluster.
+- **Docker Desktop** with Kubernetes enabled (for local development). [Download Docker Desktop](https://www.docker.com/products/docker-desktop/).
+- **CLI tools:** `kubectl` and `helm` v3 in PATH.
 - **Python:** 3.9+
 
-## Setup
+> **Note:** In CI (GitHub Actions), tests run on a **Kind** cluster created by the workflow. You only need Docker Desktop for local development.
 
-1. **Create and activate a virtual environment (recommended)**
+---
 
-   ```bash
-   python -m venv venv
-   # Windows (PowerShell):
-   .\venv\Scripts\Activate.ps1
-   # Windows (cmd) or Linux/macOS:
-   # venv\Scripts\activate  (Windows)   or   source venv/bin/activate  (Linux/macOS)
-   ```
+## Quick Start (New Developer / DevOps)
 
-2. **Install Python dependencies**
+Complete steps to run the tests from scratch on a fresh machine.
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 1. Install Docker Desktop and enable Kubernetes
 
-3. **Add Bitnami Helm repo**
+1. Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Open Docker Desktop → **Settings** → **Kubernetes** → check **Enable Kubernetes** → click **Apply & Restart**.
+3. Wait until Docker Desktop shows "Kubernetes is running" (green icon in the bottom-left).
 
-   ```bash
-   helm repo add bitnami https://charts.bitnami.com/bitnami
-   helm repo update
-   ```
+> **Context:** Docker Desktop automatically creates a kubectl context named `docker-desktop`. You do not need to create it manually.
 
-4. **Ensure cluster is running**
+### 2. Install CLI tools
 
-   ```bash
-   kubectl cluster-info
-   ```
+- **kubectl:** [Install kubectl](https://kubernetes.io/docs/tasks/tools/) or use the one bundled with Docker Desktop.
+- **Helm v3:** [Install Helm](https://helm.sh/docs/intro/install/) (e.g., `choco install kubernetes-helm` on Windows, `brew install helm` on macOS).
+
+Verify:
+
+```bash
+kubectl version --client
+helm version
+```
+
+### 3. Clone the repository
+
+```bash
+git clone <repository-url>
+cd minimus-assignment
+```
+
+### 4. Create Python virtual environment
+
+```bash
+python -m venv venv
+
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+
+# Linux/macOS:
+source venv/bin/activate
+```
+
+### 5. Install Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 6. Add Bitnami Helm repo
+
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+```
+
+### 7. Verify Kubernetes cluster is running
+
+```bash
+kubectl cluster-info
+kubectl config current-context   # should show "docker-desktop"
+```
+
+### 8. Run the tests
+
+```bash
+pytest --kube-context=docker-desktop
+```
+
+That's it! The tests will install the Helm chart, run assertions, and clean up.
+
+---
+
+## Setup (Reference)
+
+If you followed the Quick Start, you're done. This section is for reference.
+
+| Step | Command |
+|------|---------|
+| Create venv | `python -m venv venv` |
+| Activate (Windows PowerShell) | `.\venv\Scripts\Activate.ps1` |
+| Activate (Linux/macOS) | `source venv/bin/activate` |
+| Install deps | `pip install -r requirements.txt` |
+| Add Helm repo | `helm repo add bitnami https://charts.bitnami.com/bitnami && helm repo update` |
+| Verify cluster | `kubectl cluster-info` |
 
 ## Run the Test Suite
 
@@ -179,13 +240,25 @@ Tests wait for **pod Ready** (readiness probe). It helps to know how probes inte
 
 ### Locally (Docker Desktop Kubernetes)
 
-1. **Enable Kubernetes in Docker Desktop**: Settings -> Kubernetes -> Enable Kubernetes -> Apply.
+**Requirements:**
+- Docker Desktop installed and running
+- Kubernetes enabled in Docker Desktop (Settings → Kubernetes → Enable Kubernetes → Apply & Restart)
+- Wait until the Kubernetes status shows green/running
 
-2. **Run tests**:
+**Context:** When you enable Kubernetes, Docker Desktop automatically creates a kubectl context named `docker-desktop`. No manual context creation is needed.
 
-   ```bash
-   pytest --kube-context=docker-desktop
-   ```
+**Verify the cluster is ready:**
+
+```bash
+kubectl cluster-info
+kubectl config current-context   # should print: docker-desktop
+```
+
+**Run tests:**
+
+```bash
+pytest --kube-context=docker-desktop
+```
 
 ### GitHub Actions (CI)
 
