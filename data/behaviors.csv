@@ -1,4 +1,4 @@
 "BROKEN","EPIC","FAILED","FEATURE","PASSED","SKIPPED","STORY","UNKNOWN"
 "0","Minimus PostgreSQL Image Validation","0","Permission Defects (DEF-01, DEF-02)","1","0","SEC-03: Init scripts directory access","0"
-"0","Minimus PostgreSQL Image Validation","0","Permission Defects (DEF-01, DEF-02)","1","0","SEC-02: Data directory permissions (PVC masks DEF-01)","0"
 "0","Minimus PostgreSQL Image Validation","0","Permission Defects (DEF-01, DEF-02)","1","0","SEC-04: Pre-init scripts directory access","0"
+"0","Minimus PostgreSQL Image Validation","0","Permission Defects (DEF-01, DEF-02)","1","0","SEC-02: Data directory permissions (PVC masks DEF-01)","0"
