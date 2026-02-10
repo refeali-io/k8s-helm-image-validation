@@ -2,7 +2,7 @@
 # Used by tests (conftest.py) and for manual runs.
 #
 # Usage (manual):
-#   helm install my-release bitnami/postgresql -f helm-values/postgresql-defective-image-values.yaml -n minimus-test --create-namespace
+#   helm install my-release bitnami/postgresql -f helm-values/postgresql-defective-image-values.yaml -n k8s-validation-test --create-namespace
 
 global:
   security:
@@ -10,7 +10,7 @@ global:
 
 image:
   registry: docker.io
-  repository: halex1985/postgresql
+  repository: shaharm7/postgresql-under-test
   tag: latest
 
 auth:

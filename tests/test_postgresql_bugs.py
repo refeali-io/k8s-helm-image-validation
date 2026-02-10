@@ -190,11 +190,11 @@ def _assert_logs_permission_denied_for_path(
 
 @pytest.mark.helm
 @pytest.mark.defect
-@allure.epic("Minimus PostgreSQL Image Validation")
+@allure.epic("K8s Helm PostgreSQL Image Validation")
 @allure.feature("Permission Defects (DEF-01, DEF-02)")
 class TestPostgreSQLBugs:
     """
-    Defects when deploying halex1985/postgresql:latest via Bitnami Helm chart.
+    Defects when deploying shaharm7/postgresql-under-test:latest via Bitnami Helm chart.
 
     SEC-04 (preinitdb.d) and SEC-03 (initdb.d): hook dirs have drwx------ (DEF-02),
     visible in ls -ld and in container logs. Pod still starts on K8s (PVC masks DEF-01).

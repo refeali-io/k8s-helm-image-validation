@@ -2,8 +2,8 @@
 
 ## 1. Introduction
 
-**Project:** Minimus Security – PostgreSQL Minimization
-**Objective:** Validate the integrity of the minimized image (`halex1985/postgresql:latest`) and ensure strict backward compatibility with the official Bitnami Helm Chart.
+**Project:** K8s Helm Image Validation – PostgreSQL
+**Objective:** Validate the integrity of the minimized image (`shaharm7/postgresql-under-test:latest`) and ensure strict backward compatibility with the official Bitnami Helm Chart.
 **Note:** The image under test **intentionally contains defects**; the goal is to identify and document them.
 
 **Scope:**
@@ -28,13 +28,13 @@ The **"Bypass & Inspect"** methodology allows deep inspection of the image inter
 **Sanity Test (container crashes):**
 
 ```bash
-docker run --rm --name minimus-test -e POSTGRESQL_PASSWORD=mysecretpassword halex1985/postgresql:latest
+docker run --rm --name pg-validation-test -e POSTGRESQL_PASSWORD=mysecretpassword shaharm7/postgresql-under-test:latest
 ```
 
 Since the container crashes immediately upon startup, we override the entrypoint to inspect the image:
 
 ```bash
-docker run --rm -it --entrypoint /bin/sh halex1985/postgresql:latest
+docker run --rm -it --entrypoint /bin/sh shaharm7/postgresql-under-test:latest
 ```
 
 Now inside the `/bin/sh` shell we run the test cases below.
@@ -46,32 +46,32 @@ Now inside the `/bin/sh` shell we run the test cases below.
 **Deploy the chart (pod may or may not crash depending on volume permissions):**
 
 ```bash
-helm install minimus-manual bitnami/postgresql \
+helm install pg-validation-manual bitnami/postgresql \
   -f helm-values/postgresql-defective-image-values.yaml \
-  -n minimus-test --create-namespace
+  -n k8s-validation-test --create-namespace
 ```
 
 **Set the default namespace and verify:**
 
 ```bash
-kubectl config set-context --current --namespace=minimus-test
+kubectl config set-context --current --namespace=k8s-validation-test
 kubectl config view --minify --output 'jsonpath={..namespace}'
 ```
 
-The output should be `minimus-test`. Now you can omit `-n minimus-test` from subsequent commands.
+The output should be `k8s-validation-test`. Now you can omit `-n k8s-validation-test` from subsequent commands.
 
 **Access the pod shell to run the same tests:**
 
 ```bash
-kubectl exec -it -n minimus-test <pod-name> -c postgresql -- sh
+kubectl exec -it -n k8s-validation-test <pod-name> -c postgresql -- sh
 ```
 
-Replace `<pod-name>` with the actual pod name (e.g. `minimus-manual-postgresql-0`). List pods with `kubectl get pods` if needed.
+Replace `<pod-name>` with the actual pod name (e.g. `pg-validation-manual-postgresql-0`). List pods with `kubectl get pods` if needed.
 
 Or run commands directly:
 
 ```bash
-kubectl exec -n minimus-test <pod-name> -c postgresql -- ls -ld /bitnami/postgresql
+kubectl exec -n k8s-validation-test <pod-name> -c postgresql -- ls -ld /bitnami/postgresql
 ```
 
 ---
