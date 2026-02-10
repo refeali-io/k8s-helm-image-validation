@@ -3,6 +3,9 @@
 #
 # Usage (manual):
 #   helm install my-release bitnami/postgresql -f helm-values/postgresql-defective-image-values.yaml -n k8s-validation-test --create-namespace
+#
+# Probes: startupProbe gives the defective image time to start before liveness/readiness
+# run (avoids liveness killing the container in CI before it becomes Ready).
 
 global:
   security:
@@ -15,3 +18,19 @@ image:
 
 auth:
   postgresPassword: secretpassword
+
+# Give slow-starting / defective image time to pass readiness (CI and local).
+primary:
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30   # up to ~5 min before startup fails
+    successThreshold: 1
+  livenessProbe:
+    initialDelaySeconds: 60   # after startup succeeds, allow time for readiness
+    failureThreshold: 10
+  readinessProbe:
+    initialDelaySeconds: 15
+    failureThreshold: 12

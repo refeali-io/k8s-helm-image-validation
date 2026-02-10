@@ -74,6 +74,29 @@ def _wait_for_pod_ready(
     return False
 
 
+def _pod_ready_failure_message(
+    k8s_client, namespace: str, pod_name: str
+) -> str:
+    """Build an assertion message when pod did not become Ready (for CI debugging)."""
+    try:
+        pod = k8s_client.read_namespaced_pod(name=pod_name, namespace=namespace)
+        phase = getattr(pod.status, "phase", "?")
+        restarts = 0
+        for cs in pod.status.container_statuses or []:
+            restarts = getattr(cs, "restart_count", 0)
+            break
+        return (
+            f"Pod did not become Ready within timeout. "
+            f"phase={phase}, container_restarts={restarts}. "
+            "In CI, enable primary.startupProbe or relax liveness so the container can pass readiness."
+        )
+    except Exception:
+        return (
+            "Pod did not become Ready within timeout. "
+            "Cannot run exec checks. In CI, enable primary.startupProbe or relax liveness."
+        )
+
+
 @allure.step("Execute: kubectl exec ls -ld {path}")
 def _exec_ls_ld(namespace: str, pod_name: str, container: str, path: str) -> str:
     """Run ls -ld <path> in the pod. Returns stripped stdout."""
@@ -230,8 +253,9 @@ class TestPostgreSQLBugs:
         print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
         print("\n[2/4] Waiting for pod readiness (readiness probe / pg_isready)...")
-        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
+        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=120)
         print(f"      Pod ready: {ready}")
+        assert ready, _pod_ready_failure_message(k8s_client, namespace, pod_name)
 
         print(f"\n[3/4] Assert directory permissions: ls -ld {path} (SEC-04)...")
         _assert_hook_dir_permissions(
@@ -269,8 +293,9 @@ class TestPostgreSQLBugs:
         print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
         print("\n[2/4] Waiting for pod readiness (readiness probe / pg_isready)...")
-        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
+        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=120)
         print(f"      Pod ready: {ready}")
+        assert ready, _pod_ready_failure_message(k8s_client, namespace, pod_name)
 
         print(f"\n[3/4] Assert directory permissions: ls -ld {path} (SEC-03)...")
         _assert_hook_dir_permissions(
@@ -307,8 +332,9 @@ class TestPostgreSQLBugs:
         print(f"      release={release_name}, namespace={namespace}, pod={pod_name}, container={container_name}")
 
         print("\n[2/3] Waiting for pod readiness (readiness probe / pg_isready)...")
-        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=90)
+        ready = _wait_for_pod_ready(k8s_client, namespace, pod_name, timeout_sec=120)
         print(f"      Pod ready: {ready}")
+        assert ready, _pod_ready_failure_message(k8s_client, namespace, pod_name)
 
         print(f"\n[3/3] Check data dir permissions: ls -ld {path} (SEC-02)...")
         _assert_data_dir_masked_by_pvc(namespace, pod_name, container_name, path)
