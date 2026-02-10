@@ -44,7 +44,7 @@ def _report(what: str, expected: str, actual: str) -> None:
 
 
 @allure.step("Fetch container logs (tail={tail})")
-def _get_pod_logs(k8s_client, namespace: str, pod_name: str, container: str, tail: int = 200) -> str:
+def _get_pod_logs(k8s_client, namespace: str, pod_name: str, container: str, tail: int = 1000) -> str:
     """Fetch logs from the container."""
     return k8s_client.read_namespaced_pod_log(
         name=pod_name, namespace=namespace, container=container, tail_lines=tail
