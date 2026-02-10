@@ -1,7 +1,7 @@
 # K8s Helm Image Validation
 
-**Repository:** [github.com/refeali-io/k8s-helm-image-validation](https://github.com/refeali-io/k8s-helm-image-validation)  
-**Part of my [automation portfolio](https://github.com/refeali-io)** — K8s API automation that validates custom/minimized container images against Bitnami Helm charts on a real Kubernetes cluster.
+**Repository:** [github.com/refaeli-io/k8s-helm-image-validation](https://github.com/refaeli-io/k8s-helm-image-validation)  
+**Part of my [automation portfolio](https://github.com/refaeli-io)** — K8s API automation that validates custom/minimized container images against Bitnami Helm charts on a real Kubernetes cluster.
 
 Generic Helm-based test infrastructure for validating minimized container images. Currently configured for PostgreSQL; extensible to Redis, MongoDB, or any Bitnami chart.
 
@@ -370,7 +370,7 @@ No changes to `conftest.py` needed.
 | Purpose            | Image | Source |
 |--------------------|--------|--------|
 | **Reference (Bitnami)** | `bitnami/postgresql:latest` | Bitnami Helm repo / [Docker Hub](https://hub.docker.com/r/bitnami/postgresql) |
-| **Image under test**   | `refeali-io/postgresql-under-test:latest` | [Docker Hub](https://hub.docker.com/r/refeali-io/postgresql-under-test) |
+| **Image under test**   | `shaharm7/postgresql-under-test:latest` | [Docker Hub](https://hub.docker.com/r/shaharm7/postgresql-under-test) |
 
 - **In Helm values:** The image under test is set in [helm-values/postgresql-defective-image-values.yaml](helm-values/postgresql-defective-image-values.yaml) (`image.repository` + `image.tag`).
 - **In CI/local:** Tests use whatever is in that values file; no separate pull step is required if the cluster can pull from Docker Hub (public).
