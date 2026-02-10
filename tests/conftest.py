@@ -6,7 +6,7 @@ Configuration is defined inside each test class (not via CLI flags).
 The only CLI option is --kube-context to select the Kubernetes cluster.
 
 Usage:
-    pytest --kube-context=minimus-test
+    pytest --kube-context=kind-k8s-validation-test
     pytest tests/test_postgresql_bugs.py --kube-context=docker-desktop
 """
 import subprocess
@@ -30,7 +30,7 @@ def pytest_addoption(parser):
         "--kube-context",
         action="store",
         default=None,
-        help="Kubernetes context to use (e.g. docker-desktop, minimus-test). Set before any k8s/helm calls.",
+        help="Kubernetes context to use (e.g. docker-desktop, kind-k8s-validation-test). Set before any k8s/helm calls.",
     )
 
 
@@ -126,7 +126,7 @@ def helm_release(
     Test class must define:
         CHART: str           - e.g. "bitnami/postgresql"
         VALUES_FILE: str     - e.g. "helm-values/postgresql-defective-image-values.yaml"
-        NAMESPACE: str       - e.g. "minimus-test"
+        NAMESPACE: str       - e.g. "k8s-validation-test"
         RELEASE_PREFIX: str  - e.g. "pg-test"
     
     Yields (release_name, namespace).

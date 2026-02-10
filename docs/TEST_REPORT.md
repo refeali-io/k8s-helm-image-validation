@@ -5,7 +5,7 @@
 | Item | Value |
 |------|--------|
 | **Reference image** | `registry-1.docker.io/bitnami/postgresql:latest` |
-| **Image under test** | `docker.io/halex1985/postgresql:latest` |
+| **Image under test** | `docker.io/shaharm7/postgresql-under-test:latest` |
 | **Reference behavior** | Starts and initializes PostgreSQL successfully |
 | **Image under test** | Fails during setup (intentional defects) |
 
@@ -18,7 +18,7 @@
 **Command executed:**
 
 ```bash
-docker run --rm --name minimus-test -e POSTGRESQL_PASSWORD=mysecretpassword halex1985/postgresql:latest
+docker run --rm --name pg-validation-test -e POSTGRESQL_PASSWORD=mysecretpassword shaharm7/postgresql-under-test:latest
 ```
 
 **Result:** Container crashes immediately with permission errors:
@@ -44,12 +44,12 @@ We run the same inspection commands in **two environments** to compare behavior:
 
 **Docker (OCI):**
 ```bash
-docker run --rm -it --entrypoint /bin/sh halex1985/postgresql:latest
+docker run --rm -it --entrypoint /bin/sh shaharm7/postgresql-under-test:latest
 ```
 
 **Kubernetes (Helm):**
 ```bash
-kubectl exec -it -n minimus-test <pod-name> -c postgresql -- sh
+kubectl exec -it -n k8s-validation-test <pod-name> -c postgresql -- sh
 ```
 
 #### Test Results: Docker vs Kubernetes Side-by-Side
@@ -120,14 +120,14 @@ drwx------ 2 root root 4096 Jan  1  1970 /docker-entrypoint-preinitdb.d
 
 ## Part 3: Reproduction Steps (OCI / Docker)
 
-1. Pull the image once:
+1. Pull the image once (from Docker Hub):
    ```bash
-   docker pull docker.io/halex1985/postgresql:latest
+   docker pull docker.io/shaharm7/postgresql-under-test:latest
    ```
 
 2. Run the container with a password (observe crash):
    ```bash
-   docker run --rm --name minimus-test -e POSTGRESQL_PASSWORD=mysecretpassword halex1985/postgresql:latest
+   docker run --rm --name pg-validation-test -e POSTGRESQL_PASSWORD=mysecretpassword shaharm7/postgresql-under-test:latest
    ```
 
 3. Observe logs showing both defects:
@@ -136,7 +136,7 @@ drwx------ 2 root root 4096 Jan  1  1970 /docker-entrypoint-preinitdb.d
 
 4. Bypass entrypoint to confirm permissions:
    ```bash
-   docker run --rm -it --entrypoint /bin/sh halex1985/postgresql:latest
+   docker run --rm -it --entrypoint /bin/sh shaharm7/postgresql-under-test:latest
    ```
    Then inside the shell:
    ```bash
@@ -173,9 +173,9 @@ drwx------ 2 root root 4096 Jan  1  1970 /docker-entrypoint-preinitdb.d
 ### 5.1 Deployment Command
 
 ```bash
-helm install minimus-manual bitnami/postgresql \
+helm install pg-validation-manual bitnami/postgresql \
   -f helm-values/postgresql-defective-image-values.yaml \
-  -n minimus-test --create-namespace
+  -n k8s-validation-test --create-namespace
 ```
 
 ### 5.2 Observed Behavior
@@ -211,4 +211,4 @@ However, the hook directories (`/docker-entrypoint-initdb.d/`, `/docker-entrypoi
 - **DEF-02 (Hook Dirs):** Visible in logs on both Docker and K8s; non-fatal on K8s.
 - **Automation:** The automated test suite (`tests/test_postgresql_bugs.py`) checks for "Permission denied" in logs (Test 2) — this **passes** on K8s. Tests that expect pod failure (Tests 1, 3, 4) will **fail** on K8s because the pod is healthy.
 
-**Recommendation for Minimus:** The image defects are real and affect Docker deployments. On K8s, DEF-01 is masked by PVC but DEF-02 is still present (logs show errors). The image should be fixed for both environments to ensure clean logs and consistent behavior.
+**Recommendation:** The image defects are real and affect Docker deployments. On K8s, DEF-01 is masked by PVC but DEF-02 is still present (logs show errors). The image should be fixed for both environments to ensure clean logs and consistent behavior.

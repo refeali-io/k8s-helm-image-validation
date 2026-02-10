@@ -1,4 +1,7 @@
-# Minimus Image Validation Framework
+# K8s Helm Image Validation
+
+**Repository:** [github.com/refaeli-io/k8s-helm-image-validation](https://github.com/refaeli-io/k8s-helm-image-validation)  
+**Part of my [automation portfolio](https://github.com/refaeli-io)** — K8s API automation that validates custom/minimized container images against Bitnami Helm charts on a real Kubernetes cluster.
 
 Generic Helm-based test infrastructure for validating minimized container images. Currently configured for PostgreSQL; extensible to Redis, MongoDB, or any Bitnami chart.
 
@@ -14,7 +17,7 @@ Generic Helm-based test infrastructure for validating minimized container images
 ## Project Structure
 
 ```
-minimus-assignment/
+k8s-helm-image-validation/
 ├── .github/workflows/
 │   └── run-tests.yml               # CI: Kind cluster + pytest
 ├── helm-values/                    # Values files (external data)
@@ -24,7 +27,10 @@ minimus-assignment/
 │   └── test_postgresql_bugs.py     # PostgreSQL-specific tests
 ├── docs/
 │   ├── TEST_PLAN.md
-│   └── TEST_REPORT.md
+│   ├── TEST_REPORT.md
+│   ├── postgresql-under-test-layers.png   # Image-under-test layer diagram (replace with your own if desired)
+│   ├── bitnami-postgresql-layers.png
+│   └── layers-comparing.png
 ├── pytest.ini                      # Pytest configuration
 └── requirements.txt
 ```
@@ -38,7 +44,7 @@ class TestPostgreSQLBugs:
     CHART = "bitnami/postgresql"
     VALUES_FILE = "helm-values/postgresql-defective-image-values.yaml"
     CONTAINER = "postgresql"
-    NAMESPACE = "minimus-test"
+    NAMESPACE = "k8s-validation-test"
     RELEASE_PREFIX = "pg-test"
 
     def test_1_pod_becomes_unhealthy(self, helm_release, pod_name, k8s_client):
@@ -125,7 +131,7 @@ helm version
 
 ```bash
 git clone <repository-url>
-cd minimus-assignment
+cd k8s-helm-image-validation
 ```
 
 ### 4. Create Python virtual environment
@@ -202,7 +208,7 @@ pytest tests/test_postgresql_bugs.py --kube-context=docker-desktop
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--kube-context` | (none) | Kubernetes context to use (e.g. `docker-desktop` locally, `kind-minimus-test` in CI) |
+| `--kube-context` | (none) | Kubernetes context to use (e.g. `docker-desktop` locally, `kind-k8s-validation-test` in CI) |
 
 ### Setting the Kubernetes context (important)
 
@@ -245,13 +251,13 @@ You can run the tests against any local Kubernetes cluster. Use the **Quick Star
 | Option | Context name | Notes |
 |--------|--------------|--------|
 | **Docker Desktop** (K8s built-in) | `docker-desktop` | Enable in Settings → Kubernetes. Context is created automatically. |
-| **Kind** | `kind-<cluster-name>` (e.g. `kind-minimus-test`) | Create a cluster with `kind create cluster [--name <name>]`. |
+| **Kind** | `kind-<cluster-name>` (e.g. `kind-k8s-validation-test`) | Create a cluster with `kind create cluster [--name <name>]`. |
 | **Minikube** | `minikube` | Start with `minikube start`. Context is created automatically. |
 
 After your cluster is running, use the context from the table:
 
 ```bash
-pytest --kube-context=docker-desktop    # or kind-minimus-test, minikube, etc.
+pytest --kube-context=docker-desktop    # or kind-k8s-validation-test, minikube, etc.
 ```
 
 ### GitHub Actions (CI)
@@ -263,7 +269,7 @@ The pipeline [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) 
 **Job 1 – Run QA Tests**
 
 1. **Checkout** — repository is cloned on a fresh Ubuntu runner (Docker is already installed).
-2. **Create Kind cluster** — [helm/kind-action](https://github.com/marketplace/actions/kind-cluster) creates a cluster with a fixed name (`KIND_CLUSTER_NAME`, default `minimus-test`). The kubeconfig context is `kind-<name>` (e.g. `kind-minimus-test`).
+2. **Create Kind cluster** — [helm/kind-action](https://github.com/marketplace/actions/kind-cluster) creates a cluster with a fixed name (`KIND_CLUSTER_NAME`, default `k8s-validation-test`). The kubeconfig context is `kind-<name>` (e.g. `kind-k8s-validation-test`).
 3. **Python & deps** — virtualenv and `pip install -r requirements.txt` (includes `allure-pytest`).
 4. **Helm** — Helm CLI is installed; Bitnami repo is added.
 5. **Run tests** — `pytest --kube-context=kind-<name>` runs against the Kind cluster. Pytest is configured in `pytest.ini` to write Allure data to `allure-results/` (`--alluredir=allure-results --clean-alluredir`). The test class installs the chart, runs assertions, and uninstalls.
@@ -350,7 +356,7 @@ class TestRedisBugs:
     CHART = "bitnami/redis"
     VALUES_FILE = "helm-values/redis-defective-image-values.yaml"
     CONTAINER = "redis"
-    NAMESPACE = "minimus-test"
+    NAMESPACE = "k8s-validation-test"
     RELEASE_PREFIX = "redis-test"
 
     def test_1_redis_specific_defect(self, helm_release, pod_name, k8s_client):
@@ -359,7 +365,12 @@ class TestRedisBugs:
 
 No changes to `conftest.py` needed.
 
-## Reference
+## Images (where we pull from)
 
-- **Reference image:** `registry-1.docker.io/bitnami/postgresql:latest`
-- **Image under test:** `docker.io/halex1985/postgresql:latest`
+| Purpose            | Image | Source |
+|--------------------|--------|--------|
+| **Reference (Bitnami)** | `bitnami/postgresql:latest` | Bitnami Helm repo / [Docker Hub](https://hub.docker.com/r/bitnami/postgresql) |
+| **Image under test**   | `shaharm7/postgresql-under-test:latest` | [Docker Hub](https://hub.docker.com/r/shaharm7/postgresql-under-test) |
+
+- **In Helm values:** The image under test is set in [helm-values/postgresql-defective-image-values.yaml](helm-values/postgresql-defective-image-values.yaml) (`image.repository` + `image.tag`).
+- **In CI/local:** Tests use whatever is in that values file; no separate pull step is required if the cluster can pull from Docker Hub (public).
